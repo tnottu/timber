@@ -44,6 +44,7 @@ class Timber {
 	public static $autoescape = false;
 
 	public static $context_cache = array();
+	public static $template_hierarchy = array();
 
 	/**
 	 * @codeCoverageIgnore
@@ -500,6 +501,120 @@ class Timber {
 	public static function add_route( $route, $callback, $args = array() ) {
 		Helper::warn('Timber::add_route (and accompanying methods for load_view, etc. Have been deprecated and will soon be removed. Please update your theme with Route::map. You can read more in the 1.0 Upgrade Guide: https://timber.github.io/docs/upgrade-guides/1.0/');
 		\Routes::map($route, $callback, $args);
+	}
+
+	/**
+	 * Get template hierarchy for current query.
+	 *
+	 * @example
+	 * ```php
+	 * $context = Timber::get_context();
+	 * $context['posts'] = Timber::get_posts();
+	 * $templates = Timber::get_template_hierarchy();
+	 * Timber::render($templates, $context);
+	 * ```
+	 * @api
+	 * @return array A list of template candidates, in descending order of priority.
+	 */
+	public static function get_template_hierarchy() {
+
+		// Template types are listed in `wp-includes/template.php -> get_query_template()`.
+		$template_types = [
+			'index',
+			'404',
+			'archive',
+			'author',
+			'category',
+			'tag',
+			'taxonomy',
+			'date',
+			'embed',
+			'home',
+			'frontpage',
+			'page',
+			'paged',
+			'search',
+			'single',
+			'singular',
+			'attachment',
+		];
+
+		// Reset list, in case this function is run multiple times (in tests, for example).
+		self::$template_hierarchy = array();
+
+		// Add filters to catch template names.
+		foreach ( $template_types as $type ) {
+			add_filter(
+				"{$type}_template_hierarchy",
+				array( __CLASS__, '_save_template_type_hierarchy' )
+			);
+		}
+
+		/**
+		 * Trigger WP core template getter functions which will then trigger the filters added
+		 * above, thus collecting the full hierarchy. Template hierarchy function order referenced
+		 * from `wp-includes/template-loader.php`.
+		 */
+		if ( is_embed() && get_embed_template() );
+		if ( is_404() && get_404_template() );
+		if ( is_search() && get_search_template() );
+		if ( is_front_page() && get_front_page_template() );
+		if ( is_home() && get_home_template() );
+		if ( is_post_type_archive() && get_post_type_archive_template() );
+		if ( is_tax() && get_taxonomy_template() );
+		if ( is_attachment() && get_attachment_template() );
+		if ( is_single() && get_single_template() );
+		if ( is_page() && get_page_template() );
+		if ( is_singular() && get_singular_template() );
+		if ( is_category() && get_category_template() );
+		if ( is_tag() && get_tag_template() );
+		if ( is_author() && get_author_template() );
+		if ( is_date() && get_date_template() );
+		if ( is_archive() && get_archive_template() );
+		get_index_template();
+
+		// Remove filters.
+		foreach ( $template_types as $type ) {
+			remove_filter(
+				"{$type}_template_hierarchy",
+				array( __CLASS__, '_save_template_type_hierarchy' )
+			);
+		}
+
+		// Change template file extensions from `php` to `twig`.
+		self::$template_hierarchy = array_map(
+			function( $template ) {
+				return pathinfo($template)['filename'] . '.twig';
+			},
+			self::$template_hierarchy
+		);
+
+		/**
+		 * Filters the list of template candidates.
+		 *
+		 * @param array $templates Array of template names.
+		 */
+		self::$template_hierarchy = apply_filters(
+			'timber/template_hierarchy',
+			self::$template_hierarchy
+		);
+
+		return self::$template_hierarchy;
+	}
+
+	/**
+	 * Callback for `{$type}_template_hierarchy` filter.
+	 *
+	 * @internal
+	 * @param array $templates A list of template candidates for certain template type,
+	 *                         in descending order of priority.
+	 * @return array Empty array, so that `locate_template()` in `wp-includes/template.php` won't
+	 *               have to do any extra work. This callback function will be removed from the hook
+	 *               after its work is done.
+	 */
+	public static function _save_template_type_hierarchy( $templates ) {
+		self::$template_hierarchy = array_merge(self::$template_hierarchy, $templates);
+		return [];
 	}
 
 
